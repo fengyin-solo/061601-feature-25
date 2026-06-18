@@ -43,6 +43,27 @@ export interface HistorySnapshot {
   logs: LogEntry[]
 }
 
+export interface CharacterDiff {
+  id: string
+  name: string
+  avatar: string
+  affinityChange: number
+  moodChange: number
+  unlockedChange: 'unlocked' | 'locked' | 'none'
+}
+
+export interface RollbackDiff {
+  targetSnapshot: HistorySnapshot
+  currentSnapshot: HistorySnapshot
+  lostCards: { id: string; name: string; rarity: string; image: string }[]
+  lostEvents: { id: string; title: string }[]
+  characterDiffs: CharacterDiff[]
+  lostCharacters: { id: string; name: string; avatar: string }[]
+  resourcesChange: number
+  daysLost: number
+  stepsLost: number
+}
+
 export const useGameStore = defineStore('game', () => {
   const day = ref(1)
   const timeSlot = ref<TimeOfDay>('morning')
@@ -67,6 +88,8 @@ export const useGameStore = defineStore('game', () => {
   const collectedCards = ref<string[]>([])
   const logs = ref<LogEntry[]>([])
   const history = ref<HistorySnapshot[]>([])
+  const rolledBack = ref(false)
+  const rollbackOrigin = ref<{ day: number; timeSlot: TimeOfDay; snapshotIndex: number } | null>(null)
   let logIdCounter = 0
 
   const unlockedCharacters = computed(() =>
@@ -110,9 +133,97 @@ export const useGameStore = defineStore('game', () => {
     }
   }
 
+  function getCurrentSnapshot(): HistorySnapshot {
+    return {
+      day: day.value,
+      timeSlot: timeSlot.value,
+      actionsRemaining: actionsRemaining.value,
+      resources: resources.value,
+      characters: JSON.parse(JSON.stringify(characters.value)),
+      flags: [...flags.value],
+      triggeredEvents: [...triggeredEvents.value],
+      collectedCards: [...collectedCards.value],
+      logs: JSON.parse(JSON.stringify(logs.value))
+    }
+  }
+
+  function getRollbackDiff(stepIndex: number): RollbackDiff | null {
+    if (stepIndex < 0 || stepIndex >= history.value.length) return null
+    const targetSnapshot = history.value[stepIndex]
+    const currentSnapshot = getCurrentSnapshot()
+
+    const currentCardSet = new Set(currentSnapshot.collectedCards)
+    const targetCardSet = new Set(targetSnapshot.collectedCards)
+    const lostCardIds = [...currentCardSet].filter(id => !targetCardSet.has(id))
+    const lostCards = lostCardIds.map(id => {
+      const card = gameConfig.cards.find(c => c.id === id)
+      return {
+        id,
+        name: card?.name || id,
+        rarity: card?.rarity || 'common',
+        image: card?.image || '🎴'
+      }
+    })
+
+    const currentEventSet = new Set(currentSnapshot.triggeredEvents)
+    const targetEventSet = new Set(targetSnapshot.triggeredEvents)
+    const lostEventIds = [...currentEventSet].filter(id => !targetEventSet.has(id))
+    const lostEvents = lostEventIds.map(id => {
+      const event = gameConfig.events.find(e => e.id === id)
+      return { id, title: event?.title || id }
+    })
+
+    const characterDiffs: CharacterDiff[] = []
+    const lostCharacters: { id: string; name: string; avatar: string }[] = []
+    currentSnapshot.characters.forEach(curChar => {
+      const targetChar = targetSnapshot.characters.find(c => c.id === curChar.id)
+      if (curChar.unlocked && targetChar && !targetChar.unlocked) {
+        const cfg = gameConfig.characters.find(c => c.id === curChar.id)
+        lostCharacters.push({
+          id: curChar.id,
+          name: cfg?.name || curChar.id,
+          avatar: cfg?.avatar || '👤'
+        })
+      }
+      if (curChar.unlocked || (targetChar && targetChar.unlocked)) {
+        const cfg = gameConfig.characters.find(c => c.id === curChar.id)
+        characterDiffs.push({
+          id: curChar.id,
+          name: cfg?.name || curChar.id,
+          avatar: cfg?.avatar || '👤',
+          affinityChange: (targetChar?.affinity || 0) - curChar.affinity,
+          moodChange: (targetChar?.mood || 0) - curChar.mood,
+          unlockedChange:
+            curChar.unlocked && !targetChar?.unlocked ? 'locked' :
+            !curChar.unlocked && targetChar?.unlocked ? 'unlocked' : 'none'
+        })
+      }
+    })
+
+    return {
+      targetSnapshot,
+      currentSnapshot,
+      lostCards,
+      lostEvents,
+      characterDiffs,
+      lostCharacters,
+      resourcesChange: targetSnapshot.resources - currentSnapshot.resources,
+      daysLost: currentSnapshot.day - targetSnapshot.day,
+      stepsLost: history.value.length - stepIndex
+    }
+  }
+
   function rollbackToStep(stepIndex: number) {
     if (stepIndex < 0 || stepIndex >= history.value.length) return
     const snapshot = history.value[stepIndex]
+    const originalDay = day.value
+    const originalTimeSlot = timeSlot.value
+    rolledBack.value = true
+    rollbackOrigin.value = {
+      day: originalDay,
+      timeSlot: originalTimeSlot,
+      snapshotIndex: stepIndex
+    }
     day.value = snapshot.day
     timeSlot.value = snapshot.timeSlot
     actionsRemaining.value = snapshot.actionsRemaining
@@ -123,7 +234,12 @@ export const useGameStore = defineStore('game', () => {
     collectedCards.value = [...snapshot.collectedCards]
     logs.value = JSON.parse(JSON.stringify(snapshot.logs))
     history.value = history.value.slice(0, stepIndex)
-    addLog('system', `回退到第 ${snapshot.day} 天 ${getTimeLabel(snapshot.timeSlot)}`)
+    addLog('system', `⏪ 回退到第 ${snapshot.day} 天 ${getTimeLabel(snapshot.timeSlot)}（从第 ${originalDay} 天 ${getTimeLabel(originalTimeSlot)}）`)
+  }
+
+  function clearRollbackFlag() {
+    rolledBack.value = false
+    rollbackOrigin.value = null
   }
 
   function getCharacterState(id: string): CharacterState | undefined {
@@ -214,6 +330,7 @@ export const useGameStore = defineStore('game', () => {
       return false
     }
 
+    clearRollbackFlag()
     saveHistory()
     actionsRemaining.value -= actionConfig.energyCost
 
@@ -362,6 +479,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function handleEventChoice(choice: EventChoice) {
+    clearRollbackFlag()
     saveHistory()
 
     choice.effects.forEach(effect => {
@@ -439,6 +557,8 @@ export const useGameStore = defineStore('game', () => {
     collectedCards.value = []
     logs.value = []
     history.value = []
+    rolledBack.value = false
+    rollbackOrigin.value = null
     logIdCounter = 0
 
     addLog('system', '🎮 游戏开始！欢迎来到恋爱物语')
@@ -467,12 +587,16 @@ export const useGameStore = defineStore('game', () => {
     collectedCards,
     logs,
     history,
+    rolledBack,
+    rollbackOrigin,
     currentEvent,
     showEventModal,
     darkMode,
     addLog,
     saveHistory,
     rollbackToStep,
+    getRollbackDiff,
+    clearRollbackFlag,
     getCharacterState,
     updateCharacterAffinity,
     updateCharacterMood,
