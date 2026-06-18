@@ -58,7 +58,9 @@ export const useSaveStore = defineStore('save', () => {
       collectedCards: gameStore.collectedCards,
       logs: gameStore.logs,
       history: gameStore.history,
-      darkMode: gameStore.darkMode
+      darkMode: gameStore.darkMode,
+      rolledBack: gameStore.rolledBack,
+      rollbackOrigin: gameStore.rollbackOrigin
     }
     return JSON.stringify(state)
   }
@@ -78,6 +80,8 @@ export const useSaveStore = defineStore('save', () => {
       gameStore.logs = state.logs
       gameStore.history = state.history
       gameStore.darkMode = state.darkMode
+      gameStore.rolledBack = state.rolledBack ?? false
+      gameStore.rollbackOrigin = state.rollbackOrigin ?? null
       return true
     } catch (e) {
       console.error('Failed to deserialize game state:', e)

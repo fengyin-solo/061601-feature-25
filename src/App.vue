@@ -26,6 +26,12 @@ watch(() => gameStore.day, () => {
   saveStore.autoSave()
 })
 
+watch(() => gameStore.rolledBack, (newVal) => {
+  if (newVal) {
+    saveStore.autoSave()
+  }
+})
+
 watch(theme, (newTheme) => {
   document.documentElement.setAttribute('data-theme', newTheme)
 })

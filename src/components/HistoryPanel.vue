@@ -33,12 +33,9 @@ function closePreview() {
   confirmed.value = false
 }
 
-function toggleConfirm() {
-  confirmed.value = !confirmed.value
-}
-
 function doRollback() {
   if (selectedIndex.value === null) return
+  if (!confirmed.value) return
   gameStore.rollbackToStep(selectedIndex.value)
   closePreview()
   emit('close')
@@ -126,7 +123,7 @@ const criticalWarnings = computed(() => {
 
 <template>
   <Teleport to="body">
-    <div class="modal-overlay" @click.self="emit('close')">
+    <div v-if="!showPreview" class="modal-overlay" @click.self="emit('close')">
       <div class="modal-content history-modal">
         <div class="modal-header">
           <h2>📜 历史记录</h2>
@@ -170,176 +167,176 @@ const criticalWarnings = computed(() => {
         </div>
       </div>
     </div>
+  </Teleport>
 
-    <Teleport to="body">
-      <div v-if="showPreview && rollbackDiff" class="modal-overlay preview-overlay" @click.self="closePreview">
-        <div class="modal-content preview-modal">
-          <div class="modal-header">
-            <h2>⏪ 回退预览</h2>
-            <button class="close-btn" @click="closePreview">✕</button>
+  <Teleport to="body">
+    <div v-if="showPreview && rollbackDiff" class="modal-overlay preview-overlay" @click.self="closePreview">
+      <div class="modal-content preview-modal">
+        <div class="modal-header">
+          <h2>⏪ 回退预览</h2>
+          <button class="close-btn" @click="closePreview">✕</button>
+        </div>
+
+        <div class="preview-summary">
+          <div class="summary-banner">
+            回退到
+            <span class="target-time">
+              第 {{ rollbackDiff.targetSnapshot.day }} 天
+              {{ getTimeLabel(rollbackDiff.targetSnapshot.timeSlot) }}
+            </span>
+            ，丢失
+            <span class="lost-steps">{{ rollbackDiff.stepsLost }} 步</span>
+            <span v-if="rollbackDiff.daysLost > 0">
+              （{{ rollbackDiff.daysLost }} 天）
+            </span>
+            进度
           </div>
+        </div>
 
-          <div class="preview-summary">
-            <div class="summary-banner">
-              回退到
-              <span class="target-time">
-                第 {{ rollbackDiff.targetSnapshot.day }} 天
-                {{ getTimeLabel(rollbackDiff.targetSnapshot.timeSlot) }}
-              </span>
-              ，丢失
-              <span class="lost-steps">{{ rollbackDiff.stepsLost }} 步</span>
-              <span v-if="rollbackDiff.daysLost > 0">
-                （{{ rollbackDiff.daysLost }} 天）
-              </span>
-              进度
+        <div v-if="criticalWarnings.length > 0" class="warnings-section">
+          <div class="section-title">
+            <span>⚠️ 关键提醒</span>
+          </div>
+          <div class="warnings-list">
+            <div
+              v-for="(warning, idx) in criticalWarnings"
+              :key="idx"
+              class="warning-item"
+              :class="`level-${warning.level}`"
+            >
+              <span class="warning-icon">{{ warning.icon }}</span>
+              <span class="warning-text">{{ warning.text }}</span>
             </div>
           </div>
+        </div>
 
-          <div v-if="criticalWarnings.length > 0" class="warnings-section">
+        <div class="diff-sections">
+          <div class="diff-section">
             <div class="section-title">
-              <span>⚠️ 关键提醒</span>
+              <span>💎 卡牌变化</span>
+              <span class="section-count">{{ rollbackDiff.lostCards.length }} 张丢失</span>
             </div>
-            <div class="warnings-list">
+            <div v-if="rollbackDiff.lostCards.length > 0" class="cards-grid">
               <div
-                v-for="(warning, idx) in criticalWarnings"
-                :key="idx"
-                class="warning-item"
-                :class="`level-${warning.level}`"
+                v-for="card in rollbackDiff.lostCards"
+                :key="card.id"
+                class="card-item"
+                :class="getRarityClass(card.rarity)"
               >
-                <span class="warning-icon">{{ warning.icon }}</span>
-                <span class="warning-text">{{ warning.text }}</span>
+                <div class="card-icon">{{ card.image }}</div>
+                <div class="card-name">{{ card.name }}</div>
+                <div class="card-rarity">{{ getRarityLabel(card.rarity) }}</div>
+              </div>
+            </div>
+            <div v-else class="empty-diff">无卡牌丢失</div>
+          </div>
+
+          <div class="diff-section">
+            <div class="section-title">
+              <span>👥 角色状态变化</span>
+            </div>
+            <div class="characters-diff">
+              <div
+                v-for="diff in rollbackDiff.characterDiffs"
+                :key="diff.id"
+                class="char-diff-item"
+              >
+                <div class="char-avatar">{{ diff.avatar }}</div>
+                <div class="char-info">
+                  <div class="char-name">
+                    {{ diff.name }}
+                    <span v-if="diff.unlockedChange === 'locked'" class="tag tag-danger">将锁定</span>
+                  </div>
+                  <div class="char-stats">
+                    <span class="stat affinity" :class="{ negative: diff.affinityChange < 0, positive: diff.affinityChange > 0 }">
+                      💕 好感 {{ diff.affinityChange > 0 ? '+' : '' }}{{ diff.affinityChange }}
+                    </span>
+                    <span class="stat mood" :class="{ negative: diff.moodChange < 0, positive: diff.moodChange > 0 }">
+                      😊 心情 {{ diff.moodChange > 0 ? '+' : '' }}{{ diff.moodChange }}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div class="diff-sections">
-            <div class="diff-section">
-              <div class="section-title">
-                <span>💎 卡牌变化</span>
-                <span class="section-count">{{ rollbackDiff.lostCards.length }} 张丢失</span>
-              </div>
-              <div v-if="rollbackDiff.lostCards.length > 0" class="cards-grid">
-                <div
-                  v-for="card in rollbackDiff.lostCards"
-                  :key="card.id"
-                  class="card-item"
-                  :class="getRarityClass(card.rarity)"
-                >
-                  <div class="card-icon">{{ card.image }}</div>
-                  <div class="card-name">{{ card.name }}</div>
-                  <div class="card-rarity">{{ getRarityLabel(card.rarity) }}</div>
-                </div>
-              </div>
-              <div v-else class="empty-diff">无卡牌丢失</div>
+          <div class="diff-section">
+            <div class="section-title">
+              <span>📊 资源与进度</span>
             </div>
-
-            <div class="diff-section">
-              <div class="section-title">
-                <span>👥 角色状态变化</span>
-              </div>
-              <div class="characters-diff">
-                <div
-                  v-for="diff in rollbackDiff.characterDiffs"
-                  :key="diff.id"
-                  class="char-diff-item"
-                >
-                  <div class="char-avatar">{{ diff.avatar }}</div>
-                  <div class="char-info">
-                    <div class="char-name">
-                      {{ diff.name }}
-                      <span v-if="diff.unlockedChange === 'locked'" class="tag tag-danger">将锁定</span>
-                    </div>
-                    <div class="char-stats">
-                      <span class="stat affinity" :class="{ negative: diff.affinityChange < 0, positive: diff.affinityChange > 0 }">
-                        💕 好感 {{ diff.affinityChange > 0 ? '+' : '' }}{{ diff.affinityChange }}
-                      </span>
-                      <span class="stat mood" :class="{ negative: diff.moodChange < 0, positive: diff.moodChange > 0 }">
-                        😊 心情 {{ diff.moodChange > 0 ? '+' : '' }}{{ diff.moodChange }}
-                      </span>
-                    </div>
-                  </div>
+            <div class="resource-compare">
+              <div class="compare-item">
+                <span class="compare-label">代币</span>
+                <div class="compare-values">
+                  <span class="current-value">
+                    {{ rollbackDiff.currentSnapshot.resources }}
+                  </span>
+                  <span class="arrow">→</span>
+                  <span class="target-value">
+                    {{ rollbackDiff.targetSnapshot.resources }}
+                  </span>
+                  <span
+                    class="change-tag"
+                    :class="{ negative: rollbackDiff.resourcesChange < 0, positive: rollbackDiff.resourcesChange > 0 }"
+                  >
+                    {{ rollbackDiff.resourcesChange > 0 ? '+' : '' }}{{ rollbackDiff.resourcesChange }}
+                  </span>
                 </div>
               </div>
-            </div>
-
-            <div class="diff-section">
-              <div class="section-title">
-                <span>📊 资源与进度</span>
-              </div>
-              <div class="resource-compare">
-                <div class="compare-item">
-                  <span class="compare-label">代币</span>
-                  <div class="compare-values">
-                    <span class="current-value">
-                      {{ rollbackDiff.currentSnapshot.resources }}
-                    </span>
-                    <span class="arrow">→</span>
-                    <span class="target-value">
-                      {{ rollbackDiff.targetSnapshot.resources }}
-                    </span>
-                    <span
-                      class="change-tag"
-                      :class="{ negative: rollbackDiff.resourcesChange < 0, positive: rollbackDiff.resourcesChange > 0 }"
-                    >
-                      {{ rollbackDiff.resourcesChange > 0 ? '+' : '' }}{{ rollbackDiff.resourcesChange }}
-                    </span>
-                  </div>
-                </div>
-                <div class="compare-item">
-                  <span class="compare-label">行动力</span>
-                  <div class="compare-values">
-                    <span class="current-value">
-                      {{ rollbackDiff.currentSnapshot.actionsRemaining }}
-                    </span>
-                    <span class="arrow">→</span>
-                    <span class="target-value">
-                      {{ rollbackDiff.targetSnapshot.actionsRemaining }}
-                    </span>
-                  </div>
-                </div>
-                <div class="compare-item">
-                  <span class="compare-label">已触发事件</span>
-                  <div class="compare-values">
-                    <span class="current-value">
-                      {{ rollbackDiff.currentSnapshot.triggeredEvents.length }}
-                    </span>
-                    <span class="arrow">→</span>
-                    <span class="target-value">
-                      {{ rollbackDiff.targetSnapshot.triggeredEvents.length }}
-                    </span>
-                  </div>
+              <div class="compare-item">
+                <span class="compare-label">行动力</span>
+                <div class="compare-values">
+                  <span class="current-value">
+                    {{ rollbackDiff.currentSnapshot.actionsRemaining }}
+                  </span>
+                  <span class="arrow">→</span>
+                  <span class="target-value">
+                    {{ rollbackDiff.targetSnapshot.actionsRemaining }}
+                  </span>
                 </div>
               </div>
-              <div v-if="rollbackDiff.lostEvents.length > 0" class="lost-events">
-                <div class="lost-events-title">受影响的事件：</div>
-                <div class="lost-events-list">
-                  <span v-for="ev in rollbackDiff.lostEvents" :key="ev.id" class="event-tag">
-                    📖 {{ ev.title }}
+              <div class="compare-item">
+                <span class="compare-label">已触发事件</span>
+                <div class="compare-values">
+                  <span class="current-value">
+                    {{ rollbackDiff.currentSnapshot.triggeredEvents.length }}
+                  </span>
+                  <span class="arrow">→</span>
+                  <span class="target-value">
+                    {{ rollbackDiff.targetSnapshot.triggeredEvents.length }}
                   </span>
                 </div>
               </div>
             </div>
-          </div>
-
-          <div class="preview-actions">
-            <label class="confirm-checkbox">
-              <input type="checkbox" v-model="confirmed" @change="toggleConfirm" />
-              <span>我已了解以上影响，确认要回退</span>
-            </label>
-            <div class="action-buttons">
-              <button class="btn btn-secondary" @click="closePreview">取消</button>
-              <button
-                class="btn btn-danger"
-                :disabled="!confirmed"
-                @click="doRollback"
-              >
-                ⏪ 确认回退
-              </button>
+            <div v-if="rollbackDiff.lostEvents.length > 0" class="lost-events">
+              <div class="lost-events-title">受影响的事件：</div>
+              <div class="lost-events-list">
+                <span v-for="ev in rollbackDiff.lostEvents" :key="ev.id" class="event-tag">
+                  📖 {{ ev.title }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
+
+        <div class="preview-actions">
+          <label class="confirm-checkbox">
+            <input type="checkbox" v-model="confirmed" />
+            <span>我已了解以上影响，确认要回退</span>
+          </label>
+          <div class="action-buttons">
+            <button class="btn btn-secondary" @click="closePreview">取消</button>
+            <button
+              class="btn btn-danger"
+              :disabled="!confirmed"
+              @click="doRollback"
+            >
+              ⏪ 确认回退
+            </button>
+          </div>
+        </div>
       </div>
-    </Teleport>
+    </div>
   </Teleport>
 </template>
 
